@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Rolling Ball</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            user-select: none;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 0 0 10px #00ffff;
+            z-index: 10;
+        }
+        #instructions {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 20px #00ffff;
+            z-index: 20;
+        }
+        button {
+            background: #00ffff;
+            color: #000;
+            border: none;
+            padding: 12px 30px;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 25px;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: 0.2s;
+        }
+        button:hover {
+            background: #ff007f;
+            color: white;
+            box-shadow: 0 0 15px #ff007f;
+        }
+    </style>
+    <!-- טעינת ספריית Three.js לתלת-ממד -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        ניקוד: <span id="score">0</span> | מטבעות: <span id="coins">0</span>
+    </div>
+
+    <div id="instructions">
+        <h1>Neon Slope Dash</h1>
+        <p>השתמש במקשי החצים <b>שמאל (←)</b> ו-<b>ימין (→)</b> או <b>A / D</b> כדי לנווט.</p>
+        <p>🔴 התחמק ממכשולים אדומים</p>
+        <p>🟡 אוספים מטבעות זהובים</p>
+        <p>🟢 משטח ירוק = גאז! | 🔵 משטח כחול = האטה</p>
+        <button onclick="startGame()">התחל משחק</button>
+    </div>
+
+    <script>
+        let scene, camera, renderer, ball;
+        let speed = 0.6;
+        let score = 0;
+        let coinsCollected = 0;
+        let isPlaying = false;
+        
+        let obstacles = [];
+        let coins = [];
+        let pads = [];
+        
+        let ballTargetX = 0;
+
+        function init() {
+            // יצירת סצנה ותאורה
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x050505, 0.015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(0, 20, 10);
+            scene.add(dirLight);
+
+            // יצירת הכדור (השחקן)
+            const ballGeo = new THREE.SphereGeometry(0.8, 32, 32);
+            const ballMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, roughness: 0.2, metalness: 0.5 });
+            ball = new THREE.Mesh(ballGeo, ballMat);
+            ball.position.set(0, 0.8, 0);
+            scene.add(ball);
+
+            // יצירת המסלול האינסופי
+            createTrack();
+
+            // מקשים
+            document.addEventListener('keydown', onKeyDown);
+            window.addEventListener('resize', onWindowResize);
+
+            camera.position.set(0, 4, 8);
+            camera.lookAt(ball.position);
+        }
+
+        function createTrack() {
+            const trackGeo = new THREE.BoxGeometry(14, 1, 1000);
+            const trackMat = new THREE.MeshStandardMaterial({ color: 0x111122, roughness: 0.8 });
+            const track = new THREE.Mesh(trackGeo, trackMat);
+            track.position.set(0, -0.5, -450);
+            scene.add(track);
+
+            // רשת ניאון בצדדים
+            const grid = new THREE.GridHelper(14, 20, 0xff007f, 0x00ffff);
+            grid.position.set(0, 0.01, -450);
+            grid.scale.z = 50;
+            scene.add(grid);
+        }
+
+        function spawnElements() {
+            // יצירת מכשולים, מטבעות ומשטחי מהירות באופן אקראי
+            for (let z = -30; z > -800; z -= 15) {
+                let lane = (Math.random() - 0.5) * 10;
+
+                let rand = Math.random();
+                if (rand < 0.5) {
+                    // מכשול אדום
+                    let obsGeo = new THREE.BoxGeometry(2, 2, 2);
+                    let obsMat = new THREE.MeshStandardMaterial({ color: 0xff0033, emissive: 0xaa0000 });
+                    let obs = new THREE.Mesh(obsGeo, obsMat);
+                    obs.position.set(lane, 1, z);
+                    scene.add(obs);
+                    obstacles.push(obs);
+                } else if (rand < 0.8) {
+                    // מטבע זהב
+                    let coinGeo = new THREE.CylinderGeometry(0.6, 0.6, 0.2, 16);
+                    let coinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8 });
+                    let coin = new THREE.Mesh(coinGeo, coinMat);
+                    coin.rotation.x = Math.PI / 2;
+                    coin.position.set(lane, 0.8, z);
+                    scene.add(coin);
+                    coins.push(coin);
+                } else {
+                    // משטח מהירות (ירוק = בוסט, כחול = האטה)
+                    let isBoost = Math.random() > 0.5;
+                    let padGeo = new THREE.PlaneGeometry(3, 4);
+                    let padMat = new THREE.MeshBasicMaterial({ color: isBoost ? 0x00ff00 : 0x0088ff, side: THREE.DoubleSide });
+                    let pad = new THREE.Mesh(padGeo, padMat);
+                    pad.rotation.x = -Math.PI / 2;
+                    pad.position.set(lane, 0.02, z);
+                    pad.userData = { type: isBoost ? 'boost' : 'slow' };
+                    scene.add(pad);
+                    pads.push(pad);
+                }
+            }
+        }
+
+        function startGame() {
+            document.getElementById('instructions').style.display = 'none';
+            
+            // איפוס נתונים
+            score = 0;
+            coinsCollected = 0;
+            speed = 0.6;
+            ball.position.set(0, 0.8, 0);
+            ballTargetX = 0;
+
+            // ניקוי אלמנטים ישנים
+            obstacles.forEach(o => scene.remove(o));
+            coins.forEach(c => scene.remove(c));
+            pads.forEach(p => scene.remove(p));
+            obstacles = []; coins = []; pads = [];
+
+            spawnElements();
+            isPlaying = true;
+            animate();
+        }
+
+        function onKeyDown(e) {
+            if (!isPlaying) return;
+            if (e.key === "ArrowLeft" || e.key === "a") ballTargetX -= 1.8;
+            if (e.key === "ArrowRight" || e.key === "d") ballTargetX += 1.8;
+            
+            // הגבלה לגבולות המסלול
+            ballTargetX = Math.max(-5.5, Math.min(5.5, ballTargetX));
+        }
+
+        function animate() {
+            if (!isPlaying) return;
+
+            requestAnimationFrame(animate);
+
+            // תנועת הכדור
+            ball.position.z -= speed;
+            ball.position.x += (ballTargetX - ball.position.x) * 0.1;
+            ball.rotation.x -= speed * 0.5; // סיבוב הצילינדר/כדור
+
+            // תנועת המצלמה אחרי הכדור
+            camera.position.z = ball.position.z + 7;
+            camera.position.x = ball.position.x * 0.5;
+            camera.lookAt(ball.position.x, ball.position.y + 0.5, ball.position.z - 5);
+
+            // הגברת מהירות הדרגתית
+            speed += 0.0002;
+            score = Math.floor(-ball.position.z);
+            document.getElementById('score').innerText = score;
+
+            // בדיקת התנגשויות - מכשולים
+            for (let obs of obstacles) {
+                if (ball.position.distanceTo(obs.position) < 1.5) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // בדיקת איסוף - מטבעות
+            for (let i = coins.length - 1; i >= 0; i--) {
+                coins[i].rotation.z += 0.05;
+                if (ball.position.distanceTo(coins[i].position) < 1.2) {
+                    scene.remove(coins[i]);
+                    coins.splice(i, 1);
+                    coinsCollected += 1;
+                    document.getElementById('coins').innerText = coinsCollected;
+                }
+            }
+
+            // בדיקת משטחי מהירות
+            for (let pad of pads) {
+                if (ball.position.distanceTo(pad.position) < 1.5) {
+                    if (pad.userData.type === 'boost') speed += 0.05;
+                    if (pad.userData.type === 'slow') speed = Math.max(0.4, speed - 0.05);
+                }
+            }
+
+            // נפילה מהמסלול
+            if (Math.abs(ball.position.x) > 6.5) {
+                gameOver();
+                return;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function gameOver() {
+            isPlaying = false;
+            alert(`המשחק נגמר!\nניקוד: ${score}\nמטבעות: ${coinsCollected}`);
+            document.getElementById('instructions').style.display = 'block';
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        init();
+    </script>
+</body>
+</html>
